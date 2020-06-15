@@ -23,6 +23,7 @@ uniform sampler2D texSand;
 uniform sampler2D texLava;
 uniform sampler2D texRoad;
 uniform float texSclae;
+uniform float lightCoeff;
 
 varying vec2 vUv;
 
@@ -38,18 +39,18 @@ void main() {
                   DELTA_SAND)))));
 
   if (res == DELTA_GRASS) {
-    gl_FragColor = texture2D(texGrass, vUv * texSclae);
+    gl_FragColor = texture2D(texGrass, vUv * texSclae) * lightCoeff;
   } else if (res == DELTA_STONE) {
-    gl_FragColor = texture2D(texStone, vUv * texSclae);
+    gl_FragColor = texture2D(texStone, vUv * texSclae) * lightCoeff;
   } else if (res == DELTA_DIRT) {
-    gl_FragColor = texture2D(texDirt, vUv * texSclae);
+    gl_FragColor = texture2D(texDirt, vUv * texSclae) * lightCoeff;
   } else if (res == DELTA_SAND) {
-    gl_FragColor = texture2D(texSand, vUv * texSclae);
+    gl_FragColor = texture2D(texSand, vUv * texSclae) * lightCoeff;
   } else if (res == DELTA_ROAD) {
-    gl_FragColor = texture2D(texRoad, vUv * texSclae);
+    gl_FragColor = texture2D(texRoad, vUv * texSclae) * lightCoeff;
   } else if (res == DELTA_LAVA) {
-    gl_FragColor = texture2D(texLava, vUv * texSclae);
+    gl_FragColor = texture2D(texLava, vUv * texSclae) * lightCoeff;
   } else {
-    gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);
+    gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0) * lightCoeff;
   }
 }

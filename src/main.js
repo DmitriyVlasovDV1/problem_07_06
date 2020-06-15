@@ -6,29 +6,29 @@ import txtTrafficCoords from './traffic_coords.txt';
 import vertShaderStrLandscape from './landscape.vert';
 import fragShaderStrLandscape from './landscape.frag';
 
+
 import * as THREE from 'three';
 import {OrbitControls} from '../node_modules/three/examples/jsm/controls/OrbitControls.js';
 import {OBJLoader2} from '../node_modules/three/examples/jsm/loaders/OBJLoader2.js';
 import {MTLLoader} from '../node_modules/three/examples/jsm/loaders/MTLLoader.js';
 import {MtlObjBridge} from '../node_modules/three/examples/jsm/loaders/obj2/bridge/MtlObjBridge.js';
+import {FBXLoader} from '../node_modules/three/examples/jsm/loaders/FBXLoader.js';
 
 
 /* Animation system class */
 class classAnimation {
   constructor() {
-    /* Canvas */
-    this.canvas = document.getElementById("idCanvas");
 
     /* Scene */
     this.scene = new THREE.Scene();
 
     /* Renderer */
-    this.renderer = new THREE.WebGLRenderer({canvas: this.canvas});
+    this.renderer = new THREE.WebGLRenderer({canvas: canvas});
     this.renderer.setClearColor(0x111111);
     this.renderer.shadowMapEnabled = true;
     
     /* Camera*/
-    this.camera = new THREE.PerspectiveCamera(75, this.canvas.width / this.canvas.height, 0.1, 1000);
+    this.camera = new THREE.PerspectiveCamera(75, canvas.width / canvas.height, 0.1, 1000);
     this.camDir = new THREE.Vector3(0, 0, 0);
 
     /* Time */
@@ -41,6 +41,9 @@ class classAnimation {
     document.addEventListener('keydown', this.handleKeyDown);
     document.addEventListener('keyup', this.handleKeyUp);
     this.safety = true;
+
+    /* Skybox */
+    this.skyBox;
   }
 
   /* Controls handle mthods */
@@ -55,6 +58,10 @@ class classAnimation {
   handleKeys() {
     if (animSys.currentlyPressedKeys[32]) {
       flag = true;
+      infoText.innerHTML = "Press '1' to drive by yourself";
+    } if (animSys.currentlyPressedKeys[49]) {
+      traffic.cars[traffic.indPlayer].isControlled = true;
+      infoText.innerHTML = "Usable buttons: W A S D";
     }
   }
 
@@ -63,6 +70,7 @@ class classAnimation {
   setSkybox(skyboxTextures) {
     const loader = new THREE.CubeTextureLoader();
     const texture = loader.load(skyboxTextures);
+
     this.scene.background = texture;
   }
 
@@ -108,6 +116,11 @@ class classLandscape {
       this.texRoad = new THREE.TextureLoader().load(texRoadPath),
       this.texSand = new THREE.TextureLoader().load(texSandPath)];
 
+      this.imageHeight = new Image();
+      this.imageHeight.src = texHeightPath;
+      this.imageHeight.onload = () => {
+      }
+
     for (let i = 0; i < this.textures.length; i++) {
       this.textures[i].wrapS = THREE.RepeatWrapping;
       this.textures[i].wrapT = THREE.RepeatWrapping;
@@ -131,7 +144,8 @@ class classLandscape {
 
         texSclae: { value: this.texScale },
         maxHeight: { value: this.maxHeight },
-        time: {value: animSys.timeMs}
+        time: {value: animSys.timeMs},
+        lightCoeff: {value: light.value}
       },
 
       vertexShader: vertShaderStrLandscape,
@@ -140,9 +154,13 @@ class classLandscape {
 
     this.primitive = new THREE.Mesh(geometry, material);
     this.primitive.rotation.x=-0.5*Math.PI;
-    this.primitive.position.y = -5;
+    this.primitive.position.y = -1;
     this.primitive.receiveShadow = true;
+    animSys.scene.add(this.primitive);
 
+  }
+  response (){
+    this.primitive.material.uniforms.lightCoeff.value = light.value;
   }
 } 
 
@@ -214,9 +232,23 @@ class classEditor {
 let flag = false;
 class classTraffic {
   constructor() {
+    /* Auxiliary variables */
+    this.dirUp = new THREE.Vector3(0, 1, 0);
+    this.dirNorth = new THREE.Vector3();
+    this.dirSouth = new THREE.Vector3();
+    this.dirEast = new THREE.Vector3();
+    this.dirWest = new THREE.Vector3();
+    this.tmp = new THREE.Vector3();
+    this.isFirstResponse = true;
+
+    this.timeLastBuff = Date.now();
+    this.timeDeltaBuff = 10;
+    this.rangeBuff = 40;
+    this.viewAngle = 0.75;
 
     /* Segments */
     this.segments = []
+
     let arrCoords = txtTrafficCoords.split("\n");
     this.numOfSegments = arrCoords.length / 2 - 1;
     for (let i = 0; i < this.numOfSegments; i++) {
@@ -225,201 +257,260 @@ class classTraffic {
     }
 
     /* Cars */
-    let tmp = new THREE.Vector3();
-    this.minCarsGap = 10;
+    this.minCarsGap = 4;
     this.radarRadius = 20;
+
     this.cars = []
-    this.numOfCars = 15;
-    for (let i = 0; i < this.numOfCars - 1; i++) {
-      this.cars.push(new classCar(tmp.addVectors(this.segments[i][0], this.segments[i][1]).multiplyScalar(0.5), i + 1));
+    this.numOfCars = 10;
+    for (let i = 0; i < this.numOfCars; i++) {
+      this.cars.push(new classCar(this.tmp.addVectors(this.segments[i][0], this.segments[i][1]).multiplyScalar(0.5), i + 1));
     }
 
-    this.player = new classCar(tmp.addVectors(this.segments[this.numOfCars - 1][0], this.segments[this.numOfCars][1]).multiplyScalar(0.5), this.numOfCars)
-    this.player.isControllerd = true;
-
-    //this.player.primitive.copy(model_car);
-
-    this.cars.push(this.player);
+    /* Player */
+    this.indPlayer = 0;
+    this.cars[this.indPlayer].isControlled = false;
   }
-
   
   response () {
+
+    if (animSys.currentlyPressedKeys[9]) {
+      this.cars[this.indPlayer].isControlled = false;
+      this.indPlayer = (this.indPlayer + 1) % this.numOfCars;
+      this.cars[this.indPlayer].isControlled = true;
+    }
+
+    /* Computing isNewBuff */
+    let isNewBuff = false;
+    if ((Date.now() - this.timeLastBuff) / 1000.0 > this.timeDeltaBuff) {
+      this.timeLastBuff = Date.now();
+      isNewBuff = true;
+    }
+
     for (let car of this.cars) {
-      let v1 = this.segments[car.targetSegment][0];
-      let v2 = this.segments[car.targetSegment][1];
-      
-      let vC = car.primitive.position;
 
-      let vecSeg = new THREE.Vector3();
-      let vecCar = new THREE.Vector3();
-      let vecTarget = new THREE.Vector3();
-      let tmp = new THREE.Vector3();
-      let proj;
+      /* Computing targetDir and isBreaking */
+      if (car.isControlled) {
 
-      
-      vecSeg.subVectors(v2, v1);
-      vecCar.subVectors(vC, v1);
-      tmp.copy(vecSeg).normalize();
+        /* TargetDir and isBreaking */
+        this.dirEast.crossVectors(animSys.camDir, this.dirUp).normalize();
+        this.dirWest.copy(this.dirEast).negate();
+        this.dirNorth.crossVectors(this.dirWest, this.dirUp).normalize();
+        this.dirSouth.copy(this.dirNorth).negate();
 
-      vecTarget.copy(tmp).multiplyScalar(vecCar.dot(tmp));
-
-      if (vecTarget.length() > vecSeg.length() || tmp.subVectors(vecSeg, vecTarget).length() > vecSeg.length()) {
-        if (vecTarget.length() < tmp.subVectors(vecSeg, vecTarget).length()) {
-          vecTarget.set(0, 0, 0);
-        } else {
-          vecTarget.copy(vecSeg);
+        car.isBreaking = true;
+        car.targetDir.copy(this.dirNorth.multiplyScalar(1));
+        if (animSys.currentlyPressedKeys['W'.charCodeAt(0)]) {
+          car.targetDir.add(this.dirNorth.multiplyScalar(1.5));
+          car.isBreaking = false;
         }
-      }
+        if (animSys.currentlyPressedKeys['A'.charCodeAt(0)]) {
+          car.targetDir.add(this.dirWest);
+        } if (animSys.currentlyPressedKeys['D'.charCodeAt(0)]) {
+          car.targetDir.add(this.dirEast);
+        }
+        car.targetDir.normalize();
 
-      car.moveTargetDir.subVectors(vecTarget, vecCar);
-
-      if (car.moveTargetDir.length() < 2) {
-        car.targetSegment = (car.targetSegment + 1) % this.numOfSegments;
-      }
-      car.moveTargetDir.normalize();
-
-      let prog = vecTarget.length() / vecSeg.length();
-      let isBreaking = false;
-      for (let car2 of this.cars) {
-        tmp.subVectors(car2.primitive.position, car.primitive.position);
-        if (tmp.length() < this.radarRadius && tmp.normalize().dot(car.moveTargetDir) > 0.80) {
-          if (tmp.length() < this.minCarsGap) {
-            isBreaking = true;
+        /* Correcting isBreaking */
+        for (let car2 of this.cars) {
+          this.tmp.subVectors(car2.primitive.position, car.primitive.position);
+          if (this.tmp.length() < this.minCarsGap && this.tmp.normalize().dot(car.targetDir) > this.viewAngle) {
+            car.isBreaking = true;
+            break;
           }
-          if (prog < 0.5) {
-            car.moveTargetDir.copy(tmp.copy(vecSeg).normalize().add(car.moveTargetDir).normalize());
+        }
+
+      } else {
+        /* TargetDir */
+        let v1 = this.segments[car.targetSegment][0];
+        let v2 = this.segments[car.targetSegment][1];
+        let vC = car.primitive.position;
+
+        let vecSeg = new THREE.Vector3();
+        let vecCar = new THREE.Vector3();
+        let vecTarget = new THREE.Vector3();
+
+        vecSeg.subVectors(v2, v1);
+        vecCar.subVectors(vC, v1);
+        this.tmp.copy(vecSeg).normalize();
+
+        vecTarget.copy(this.tmp).multiplyScalar(vecCar.dot(this.tmp));
+
+        if (vecTarget.length() > vecSeg.length() || this.tmp.subVectors(vecSeg, vecTarget).length() > vecSeg.length()) {
+          if (vecTarget.length() < this.tmp.subVectors(vecSeg, vecTarget).length()) {
+            vecTarget.set(0, 0, 0);
           } else {
-            car.moveTargetDir.copy(tmp.copy(vecSeg).normalize().negate().add(car.moveTargetDir).normalize());
+            vecTarget.copy(vecSeg);
+          }
+        }
+
+        car.targetDir.subVectors(vecTarget, vecCar);
+
+        if (car.targetDir.length() < 10) {
+          car.targetSegment = (car.targetSegment + 1) % this.numOfSegments;
+        }
+
+        car.targetDir.normalize();
+
+        /* isBreking and correcting targetDir */
+        let prog = vecTarget.length() / vecSeg.length();
+        let vecBetweenCars = new THREE.Vector3();
+        car.isBreaking = false;
+        for (let car2 of this.cars) {
+          vecBetweenCars = this.tmp.subVectors(car2.primitive.position, car.primitive.position);
+          if (vecBetweenCars.length() < this.radarRadius && this.tmp.normalize().dot(car.currentDir) > this.viewAngle) {
+            if (vecBetweenCars.length() < this.minCarsGap) {
+              car.isBreaking = true;
+            }
+            if (prog > 0.5) {
+              car.targetDir.copy(this.tmp.subVectors(this.tmp.set(0, 0, 0), vecCar)).normalize();
+            } else {
+              car.targetDir.copy(this.tmp.subVectors(this.tmp.copy(vecSeg), vecCar)).normalize();
+            }
           }
         }
       }
 
-      car.response(isBreaking);
+      /* Computing currentBuff */
+      if (isNewBuff) {
+        car.currentBuff = (Math.random()) * this.rangeBuff;
+      } 
+
+      /* Draw speed */
+      if (car === this.cars[0]) {
+        speedText.innerHTML = `Your speed: ${(car.currentSpeed / 3.6).toFixed(2)} km/h`;
+      }
+
+      /* car response */
+      car.response();
     }
   }
-  
 }
 
 
 class classCar {
   constructor (position, targetSegment) {
     /* Model */
-    
     let geometry = new THREE.SphereGeometry(5, 20, 20);
     let material = new THREE.MeshPhongMaterial( { color: 0xAA00AA } );
     this.primitive = new THREE.Mesh(geometry, material);
     
-    /*this.primitive = new THREE.Object3D();
-    this.primitive.copy(model_car);*/
+    this.primitive = new THREE.Object3D();
+    this.primitive.copy(model_car).scale.set(0.85, 0.85, 0.85);
     this.primitive.position.copy(position);
+    
+    this.maxVolume = 3;
+    
+    listener = new THREE.AudioListener();
+    animSys.camera.add( listener );
+    const audioLoader = new THREE.AudioLoader();
+      
+    audioLoader.load( './src/sounds/car_motor.mp3', ( buffer ) => {
+      
+      let sound = new THREE.PositionalAudio( listener );
+      sound.setBuffer( buffer );
+      sound.setRefDistance( 10 );
+      
+      sound.setLoopEnd(buffer.duration * (0.7 + 0.3 * Math.random()));
+      sound.setLoopStart(buffer.duration * 0.3 * Math.random());
+      sound.setLoop(true);
+      this.primitive.add(sound);
+    });
 
+    audioLoader.load( './src/sounds/car_on_speed.mp3', ( buffer ) => {
+      
+      let sound = new THREE.PositionalAudio( listener );
+      sound.setBuffer( buffer );
+      sound.setRefDistance( 10 );
+      
+      sound.setLoopEnd(buffer.duration * (0.5 + 0.3 * Math.random()));
+      sound.setLoopStart(buffer.duration * 0.3 * Math.random());
+      sound.setLoop(true);
+      this.primitive.add(sound);
+    });
 
     animSys.scene.add(this.primitive);
 
-
-
     /* Movements params */
+
+    /* Constants */
     this.maxSpeed = 75;
-    this.rotationSpeed = 0.2;
+    this.rotationSpeed = 0.1;
     this.accelerationStarting = 20;
-    this.accelerationBreaking = -60;
+    this.accelerationBreaking = -100;
 
-    this.currendBuff = 0;
-    this.maxBuff = 70;
-
+    /* Current params */
+    this.currentBuff = 0;
     this.currentSpeed = 0.0;
     this.currentAcceleration = 0.0;
+    this.currentDir = new THREE.Vector3(0, 0, 0);
     
-    this.timeLastUpdate = Date.now();
-    this.isFirstResponse = true;
-    this.timeLastBuff = Date.now();
-    this.moveTargetDir = new THREE.Vector3(0, 0 ,0);
-    this.moveDir = new THREE.Vector3(0, 0 ,0);
+    this.timeLastResponse = Date.now();
+    this.timeLastModelTurn = Date.now();
+    
+    this.targetDir = new THREE.Vector3();
     this.targetSegment = targetSegment;
+    this.isFirstResponse = true;
+    this.isBreaking = false;
+    this.isControlled = false;
 
-    this.dirUp = new THREE.Vector3(0, 1, 0);
-
-    this.isControllerd = false;
-
-    this.dirUp = new THREE.Vector3(0, 1, 0);
-    this.dirNorth = new THREE.Vector3();
-    this.dirSouth = new THREE.Vector3();
-    this.dirEast = new THREE.Vector3();
-    this.dirWest = new THREE.Vector3();
-
+    /* Auxiliary variables */
+    this.tmp = new THREE.Vector3();
   }
 
-  response (isBreaking) {
+  response () {
     if (this.isFirstResponse) {
+      this.primitive.children[2].play();
+      this.primitive.children[3].play();
+      //this.primitive.children[3].play();
       this.isFirstResponse = false;
-      this.timeLastUpdate = Date.now();
-      this.timeLastBuff = Date.now();
+      this.timeLastResponse = Date.now();
       return;
     }
 
-    let tmp = new THREE.Vector3();
+    /* Computing delta time */
+    let deltaTime = (Date.now() - this.timeLastResponse) / 1000.0;
+    this.timeLastResponse = Date.now();
 
-    if (this.isControllerd) {
-      speedText.innerHTML = `Your speed: ${((this.currentSpeed) * 10 / 36).toFixed(2)} km/h`;
 
-      this.dirEast.crossVectors(animSys.camDir, this.dirUp).normalize();
-      this.dirWest.copy(this.dirEast).negate();
-      this.dirNorth.crossVectors(this.dirWest, this.dirUp).normalize();
-      this.dirSouth.copy(this.dirNorth).negate();
-
-      if (!isBreaking && animSys.currentlyPressedKeys['W'.charCodeAt(0)]) {
-        this.currentAcceleration = this.accelerationStarting;
-        this.moveDir.copy(this.dirNorth.multiplyScalar(this.rotationSpeed * 1.5));
-      } else {
-        this.currentAcceleration = this.accelerationBreaking;  
-      }
-      if (animSys.currentlyPressedKeys['A'.charCodeAt(0)]) {
-        this.moveDir.add(this.dirWest.multiplyScalar(this.rotationSpeed));
-      } if (animSys.currentlyPressedKeys['D'.charCodeAt(0)]) {
-        this.moveDir.add(this.dirEast.multiplyScalar(this.rotationSpeed));
-      }
+    /* Computing current acceleration */
+    if (this.isBreaking && this.currentSpeed > 0) {
+      this.currentAcceleration = this.accelerationBreaking;
+    } else if (!this.isBreaking && this.currentSpeed < this.maxSpeed + this.currentBuff) {
+      this.currentAcceleration = this.accelerationStarting;
     } else {
-      if (!isBreaking && this.currentSpeed < this.maxSpeed) {
-        this.currentAcceleration = this.accelerationStarting;
-      } else if (isBreaking && this.currentSpeed > 0.0) {
-        this.currentAcceleration = this.accelerationBreaking;
-      } else {
-        this.currentAcceleration = 0.0;
-      }
-
-      this.moveDir.add(tmp.subVectors(this.moveTargetDir.normalize(), this.moveDir.normalize()).normalize().multiplyScalar(this.rotationSpeed));
+      this.currentAcceleration = 0;
     }
 
-    let deltaTime = (Date.now() - this.timeLastUpdate) / 1000.0;
-    this.timeLastUpdate = Date.now();
 
-    if ((Date.now() - this.timeLastBuff) / 1000.0 > 10) {
-      this.currendBuff = (Math.random() - 0.5) * this.maxBuff;
-      this.timeLastBuff = Date.now();
-    } 
-    if (this.isControllerd && (Date.now() - this.timeLastBuff) / 1000.0 < 3) {
-      infoText.innerHTML = `Your max speed have been changed to ${((this.maxSpeed + this.currendBuff) * 10 / 36).toFixed(2)} km/h`;
-      this.flagInfo = true;
-    } else if (this.isControllerd && this.flagInfo) {
-      let arr = [`Be careful! ♥`, `Going out of textures isnt fair ☺`, `Turtle on the road!`, `Only ${traffic.numOfCars - 1} left!`];
-      this.flagInfo = false;
-      infoText.innerHTML = arr[Math.floor(Math.random() * arr.length)];
-    }
-    
-
-
+    /* Computing currentSpeed */
     this.currentSpeed += this.currentAcceleration * deltaTime;
 
-    if (this.currentSpeed > this.maxSpeed + this.currendBuff) {
-      this.currentSpeed = this.maxSpeed + this.currendBuff;
+    if (this.currentSpeed > this.maxSpeed + this.currentBuff) {
+      this.currentSpeed = this.maxSpeed + this.currentBuff;
     } else if (this.currentSpeed < 0.0) {
       this.currentSpeed = 0.0;
     }
 
-    let deltaLength = this.currentSpeed * deltaTime + 0.5 * this.currentAcceleration * deltaTime ** 2;
+    this.primitive.children[3].setVolume(this.maxVolume * (this.currentSpeed / (this.maxSpeed + this.currentBuff)));
+    this.primitive.children[2].setVolume(this.maxVolume * (1 - (this.currentSpeed / (this.maxSpeed + this.currentBuff))));
     
-    this.primitive.lookAt(tmp.addVectors(this.moveDir, this.primitive.position));
-    this.primitive.position.add(tmp.copy(this.moveDir.normalize()).multiplyScalar(deltaLength));
+
+    /* Computing delta length */
+    let deltaLength = this.currentSpeed * deltaTime + 0.5 * this.currentAcceleration * deltaTime ** 2;
+
+    /* Computing currentDir */
+    this.currentDir.add(this.tmp.subVectors(this.targetDir, this.currentDir).normalize().multiplyScalar(this.rotationSpeed)).normalize();
+
+    /* Movement */
+    //this.primitive.lookAt(this.tmp.addVectors(this.currentDir, this.primitive.position));
+    this.primitive.position.add(this.tmp.copy(this.currentDir).multiplyScalar(deltaLength));
+
+    if (this.tmp.subVectors(this.targetDir, this.currentDir).length() < this.rotationSpeed) {
+      this.primitive.lookAt(this.tmp.addVectors(this.targetDir, this.primitive.position));
+    } else {
+      this.primitive.lookAt(this.tmp.addVectors(this.currentDir, this.primitive.position));
+    }
+    
   }
 }
 
@@ -449,15 +540,17 @@ class classCameraTracker {
     let isBreaking = false;
     if (tmp.subVectors(tmp.copy(target).add(this.height), animSys.camera.position).length() < this.minDistance) {
       isBreaking = true;
+    } 
+    if (tmp.length() < this.minDistance / 3) {
+      this.currentSpeed = 0;
     }
 
 
-    if (!isBreaking && this.currentSpeed < this.maxSpeed) {
-      this.currentAcceleration = this.deltaAcceleration;
-    } else if (isBreaking && this.currentSpeed > 0.0) {
+
+    if (isBreaking) {
       this.currentAcceleration = -this.deltaAcceleration;
     } else {
-      this.currentAcceleration = 0.0;
+      this.currentAcceleration = this.deltaAcceleration;
     }
 
     let deltaTime = (Date.now() - this.timeLastUpdate) / 1000.0;
@@ -479,79 +572,100 @@ class classCameraTracker {
   }
 }
 
+class classLight {
+  constructor (color, dayTime) {
+    this.dayTime = dayTime;
+    this.color = color;
+
+    this.spotLight = new THREE.SpotLight(color);
+    this.value = Math.sin(((animSys.timeMs / 1000.0) % this.dayTime) / this.dayTime * Math.PI) * 0.8 + 0.2;
+    this.spotLight.power = this.value * Math.PI;
+    this.spotLight.position.set(-40, 600, -10);
+    this.spotLight.castShadow = true;
+    animSys.scene.add(this.spotLight);
+  }
+
+  response () {
+    this.value = Math.sin(((animSys.timeMs / 1000.0) % this.dayTime) / this.dayTime * Math.PI) * 0.8 + 0.2;
+    this.spotLight.power = this.value * Math.PI;
+  }
+
+}
+
+
 
 function tick() {
   requestAnimationFrame(tick);
 
   /* Response */
-
   animSys.response();
+
+  light.response();
+  landscape.response();
   //editor.response();
   if (flag) {
     traffic.response();
-    cameraTracker.response(traffic.player.primitive.position);
+    cameraTracker.speed = traffic.cars[traffic.indPlayer].maxSpeed + traffic.cars[traffic.indPlayer].currentBuff - 10;
+    cameraTracker.response(traffic.cars[traffic.indPlayer].primitive.position);
   }
 
   /* Render */
   animSys.render();
 }
 
-let speedText;
 let infoText;
+let speedText;
 let animSys;
 let cameraTracker;
 let landscape;
 let editor;
-let editor1;
-let editor2;
 let traffic;
 let model_car;
-const objLoader = new OBJLoader2();
-const mtlLoader = new MTLLoader();
+let sound_01;
+let sound_buffer_01;
+let listener;
+let light;
+let canvas;
 
-function mainFunction() {
+async function initialization () {
+  /* Animation system */
+  await new Promise(function (resolve, reject) {
+    animSys = new classAnimation();
+    animSys.setCamPos([-30, 40, 30]);
+    animSys.setCamAt([0, 0, 0]);
+    resolve();
+  });
 
-  /* Initialization of animation system */
-  animSys = new classAnimation();
-  animSys.setCamPos([-30, 40, 30]);
-  animSys.setCamAt([0, 0, 0]);
+  /* Resources */
+  await new Promise(function (resolve, reject) {
+    /* Models */
+    const mtlLoader = new MTLLoader();
+    mtlLoader.load('./src/sport_car_01/car.mtl', (mtlParseResult) => {
+        const objLoader = new OBJLoader2();
+        const materials =  MtlObjBridge.addMaterialsFromMtlLoader(mtlParseResult);
+        materials.Material.side = THREE.DoubleSide;
+        objLoader.addMaterials(materials);
+        objLoader.load('./src/sport_car_01/car.obj', (root) => {
+          model_car = root;
+          resolve();
+        });
+      })
+    });
 
-
-  
-  mtlLoader.load('./src/lego_car/lego_car_b2.mtl', (mtlParseResult) => {
-    const materials =  MtlObjBridge.addMaterialsFromMtlLoader(mtlParseResult);
-    objLoader.addMaterials(materials);
-    objLoader.load('./src/lego_car/lego_car_b2.obj', (root) => {
-      root.applyMatrix4((new THREE.Matrix4()).scale(new THREE.Vector4(0.5, 0.5, 0.5)));
-      animSys.scene.add(root);
-     })});
-  
-
-  traffic = new classTraffic();
-
-  cameraTracker = new classCameraTracker(80, 50, 40, 20);
-
-  
-  let commonPath = "./src/images/landscape/";
-
+  /* Camera tracker system */
+  cameraTracker = new classCameraTracker(100, 70, 20, 10);
 
   /* Light */
-  let spotLight = new THREE.SpotLight( 0xffffff );
-  spotLight.position.set( -40, 600, -10 );
-  spotLight.castShadow = true;
-  animSys.scene.add(spotLight);
+  light = new classLight(0xffffff, 40);
 
-  /* Cube */
-  let geometryCube = new THREE.BoxGeometry(5, 5, 5);
-  let materialCube = new THREE.MeshLambertMaterial( { color: 0x3333333 } );
-  let cube = new THREE.Mesh( geometryCube, materialCube );
-  cube.castShadow = true;
+  /* Traffic */
+  traffic = new classTraffic();
 
-  cube.position.y = 20;
-  animSys.scene.add( cube );
+  /* Landscape */
+  let commonPath = "./src/images/landscape/";
 
   landscape = new classLandscape(75.0, 500, 500, 500, 500, 
-    20.0,
+    40.0,
     commonPath + "texture_height.jpg", 
     commonPath + "texture_materials.jpg", 
     commonPath + "texture_grass.jpg", 
@@ -561,28 +675,14 @@ function mainFunction() {
     commonPath + "texture_lava.jpg",
     commonPath + "texture_road.jpg");
 
-  animSys.scene.add(landscape.primitive);  
+  /* Editor */
+  /*
+  editor = new classEditor(4, 0xff0000, 0.5);
+  animSys.scene.add(editor.primitive); 
+  */
 
-  //editor = new classEditor(4, 0xff0000, 0.5);
-  //animSys.scene.add(editor.primitive); 
-  
 
-  /* Plane */
-  let geometryPlane = new THREE.PlaneGeometry(60,20,1,1);
-  let materialPlane = new THREE.MeshLambertMaterial( { color: 0x999999 } );
-  let plane = new THREE.Mesh( geometryPlane, materialPlane );
-  plane.receiveShadow = true;
-
-  plane.rotation.x=-0.5*Math.PI;
-	plane.position.x = 15;
-	plane.position.y = 0;
-  plane.position.z = 0;
-  
-  animSys.scene.add( plane );
-
-  let axes = new THREE.AxisHelper( 20 );
-	animSys.scene.add(axes);
-
+  /* Skybox */
   animSys.setSkybox([
     './src/images/skybox_01/xpos.jpg',
     './src/images/skybox_01/xneg.jpg',
@@ -591,18 +691,25 @@ function mainFunction() {
     './src/images/skybox_01/zpos.jpg',
     './src/images/skybox_01/zneg.jpg'
     ]);
-  tick();
 
+}
 
-  /*
-  document.addEventListener('keydown', Mandelbrot.handleKeyDown);
-  document.addEventListener('keyup', Mandelbrot.handleKeyUp);
-  */
-
+function mainFunction() {
+  /* HTML texts */
   infoText = document.getElementById("idInfo");
   speedText = document.getElementById("idSpeed");
 
+  /* Canvas */
+  canvas = document.getElementById("idCanvas");
   
+  infoText.innerHTML = "We are loading resources...";
+  initialization().then(
+    result => {
+      infoText.innerHTML = "Press SPACE to start race";
+      tick();
+    },
+    error => alert(error)
+  );
 }
 
 document.addEventListener('DOMContentLoaded', mainFunction);
