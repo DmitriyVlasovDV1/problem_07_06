@@ -1,4 +1,3 @@
-#include <common>
 #define GRASS (vec4(0.0, 1.0, 0.0, 1.0))
 #define STONE (vec4(1.0, 0.0, 1.0, 1.0))
 #define DIRT (vec4(0.0, 1.0, 1.0, 1.0))
@@ -14,7 +13,6 @@
 #define DELTA_ROAD (length(ROAD - material))
 
 
-
 uniform sampler2D texMaterials;
 uniform sampler2D texGrass;
 uniform sampler2D texStone;
@@ -25,7 +23,7 @@ uniform sampler2D texRoad;
 uniform float texSclae;
 uniform float lightCoeff;
 
-varying vec2 vUv;
+in vec2 vUv;
 
 void main() {
 
@@ -53,4 +51,5 @@ void main() {
   } else {
     gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0) * lightCoeff;
   }
+
 }

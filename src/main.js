@@ -9,10 +9,9 @@ import fragShaderStrLandscape from './landscape.frag';
 
 import * as THREE from 'three';
 import {OrbitControls} from '../node_modules/three/examples/jsm/controls/OrbitControls.js';
-import {OBJLoader2} from '../node_modules/three/examples/jsm/loaders/OBJLoader2.js';
-import {MTLLoader} from '../node_modules/three/examples/jsm/loaders/MTLLoader.js';
-import {MtlObjBridge} from '../node_modules/three/examples/jsm/loaders/obj2/bridge/MtlObjBridge.js';
+
 import {FBXLoader} from '../node_modules/three/examples/jsm/loaders/FBXLoader.js';
+import * as dat from 'dat.gui';
 
 
 /* Animation system class */
@@ -22,8 +21,11 @@ class classAnimation {
     /* Scene */
     this.scene = new THREE.Scene();
 
+    let context = canvas.getContext( 'webgl2', { alpha: false } );
+    
     /* Renderer */
-    this.renderer = new THREE.WebGLRenderer({canvas: canvas});
+    this.renderer = new THREE.WebGLRenderer( { canvas: canvas, context: context } );
+
     this.renderer.setClearColor(0x111111);
     this.renderer.shadowMapEnabled = true;
     
@@ -34,6 +36,7 @@ class classAnimation {
     /* Time */
     this.timeMs = Date.now();
     this.timeStart = Date.now();
+    this.isPause = false;
 
     /* Controls */
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
@@ -62,6 +65,10 @@ class classAnimation {
     } if (animSys.currentlyPressedKeys[49]) {
       traffic.cars[traffic.indPlayer].isControlled = true;
       infoText.innerHTML = "Usable buttons: W A S D";
+    } if (animSys.currentlyPressedKeys['P'.charCodeAt(0)]) {
+      this.isPause = true;
+    } if (animSys.currentlyPressedKeys['G'.charCodeAt(0)]) {
+      this.isPause = false;
     }
   }
 
@@ -87,7 +94,9 @@ class classAnimation {
   response() {
     this.camera.getWorldDirection(this.camDir);
     this.handleKeys();
-    this.timeMs = Date.now() - this.timeStart;
+    if (!this.isPause) {
+      this.timeMs = Date.now() - this.timeStart;
+    }
   }
 
   render() {
@@ -145,7 +154,8 @@ class classLandscape {
         texSclae: { value: this.texScale },
         maxHeight: { value: this.maxHeight },
         time: {value: animSys.timeMs},
-        lightCoeff: {value: light.value}
+        lightCoeff: {value: light.value},
+        lightColor: {value: light.primitive.color}
       },
 
       vertexShader: vertShaderStrLandscape,
@@ -154,13 +164,14 @@ class classLandscape {
 
     this.primitive = new THREE.Mesh(geometry, material);
     this.primitive.rotation.x=-0.5*Math.PI;
-    this.primitive.position.y = -1;
+    this.primitive.position.y = 0;
     this.primitive.receiveShadow = true;
     animSys.scene.add(this.primitive);
 
   }
   response (){
     this.primitive.material.uniforms.lightCoeff.value = light.value;
+    this.primitive.material.uniforms.time.value = animSys.timeMs;
   }
 } 
 
@@ -241,9 +252,9 @@ class classTraffic {
     this.tmp = new THREE.Vector3();
     this.isFirstResponse = true;
 
-    this.timeLastBuff = Date.now();
-    this.timeDeltaBuff = 10;
-    this.rangeBuff = 40;
+    this.timeLastBuff = animSys.timeMs;
+    this.timeDeltaBuff = 40;
+    this.rangeBuff = 4;
     this.viewAngle = 0.75;
 
     /* Segments */
@@ -281,8 +292,8 @@ class classTraffic {
 
     /* Computing isNewBuff */
     let isNewBuff = false;
-    if ((Date.now() - this.timeLastBuff) / 1000.0 > this.timeDeltaBuff) {
-      this.timeLastBuff = Date.now();
+    if ((animSys.timeMs - this.timeLastBuff) / 1000.0 > this.timeDeltaBuff) {
+      this.timeLastBuff = animSys.timeMs;
       isNewBuff = true;
     }
 
@@ -389,15 +400,25 @@ class classTraffic {
 
 class classCar {
   constructor (position, targetSegment) {
-    /* Model */
-    let geometry = new THREE.SphereGeometry(5, 20, 20);
-    let material = new THREE.MeshPhongMaterial( { color: 0xAA00AA } );
-    this.primitive = new THREE.Mesh(geometry, material);
-    
-    this.primitive = new THREE.Object3D();
-    this.primitive.copy(model_car).scale.set(0.85, 0.85, 0.85);
+    /* Auxiliary variables */
+    this.tmpVec = new THREE.Vector3();
+    this.tmpMat = new THREE.Matrix4();
+
+    /* Main Group */
+    this.primitive = new THREE.Group();
     this.primitive.position.copy(position);
+    animSys.scene.add(this.primitive);
     
+
+    /* Model */
+    this.model = new THREE.Object3D();
+    this.model.copy(model_car)
+    this.model.scale.set(0.03, 0.03, 0.03);
+    this.model.position.set(6.6, 1, 6.6);
+    this.model.rotation.y = -0.5 * Math.PI;
+    this.primitive.add(this.model);
+
+    /* Sounds */
     this.maxVolume = 3;
     
     listener = new THREE.AudioListener();
@@ -413,7 +434,9 @@ class classCar {
       sound.setLoopEnd(buffer.duration * (0.7 + 0.3 * Math.random()));
       sound.setLoopStart(buffer.duration * 0.3 * Math.random());
       sound.setLoop(true);
-      this.primitive.add(sound);
+
+      this.sound_00 = sound;
+      this.primitive.add(this.sound_00);
     });
 
     audioLoader.load( './src/sounds/car_on_speed.mp3', ( buffer ) => {
@@ -425,52 +448,68 @@ class classCar {
       sound.setLoopEnd(buffer.duration * (0.5 + 0.3 * Math.random()));
       sound.setLoopStart(buffer.duration * 0.3 * Math.random());
       sound.setLoop(true);
-      this.primitive.add(sound);
+      this.sound_01 = sound;
+      this.primitive.add(this.sound_01);
+      
     });
 
-    animSys.scene.add(this.primitive);
+    /* Headlights */
+    this.lights = [new THREE.SpotLight(), new THREE.SpotLight()];
 
+    for (let i = 0; i < 2; i++) {
+      this.lights[i].color.set(0xffFFff);
+      this.lights[i].intensity = 1;
+
+      this.lights[i].position.copy(this.tmpVec.set( ((i % 2) * 2 - 1) * 2.45, 2.3, 11.85));
+      this.lights[i].target.position.copy(this.tmpVec.addVectors(this.lights[i].position, new THREE.Vector3(0, 0, 1)));
+      this.lights[i].angle = 0.3;
+      this.lights[i].distance = 10;
+      
+      this.lights[i].add(this.lights[i].target);
+      
+      this.primitive.add(this.lights[i]);
+    }
+    
     /* Movements params */
 
     /* Constants */
-    this.maxSpeed = 75;
+    this.maxSpeed = 70;
     this.rotationSpeed = 0.1;
     this.accelerationStarting = 20;
     this.accelerationBreaking = -100;
+    this.radiusWheel = 0.8;
 
     /* Current params */
     this.currentBuff = 0;
     this.currentSpeed = 0.0;
     this.currentAcceleration = 0.0;
     this.currentDir = new THREE.Vector3(0, 0, 0);
-    
-    this.timeLastResponse = Date.now();
-    this.timeLastModelTurn = Date.now();
-    
     this.targetDir = new THREE.Vector3();
     this.targetSegment = targetSegment;
+    
+    /* Time params */
+    this.timeLastResponse = animSys.timeMs;
+    this.timeLastModelTurn = animSys.timeMs;
+
+    /* Flags */
     this.isFirstResponse = true;
     this.isBreaking = false;
     this.isControlled = false;
-
-    /* Auxiliary variables */
-    this.tmp = new THREE.Vector3();
   }
 
   response () {
     if (this.isFirstResponse) {
-      this.primitive.children[2].play();
-      this.primitive.children[3].play();
-      //this.primitive.children[3].play();
+      this.sound_00.play();
+      this.sound_01.play();
+
       this.isFirstResponse = false;
-      this.timeLastResponse = Date.now();
+      this.timeLastResponse = animSys.timeMs;
       return;
     }
 
     /* Computing delta time */
-    let deltaTime = (Date.now() - this.timeLastResponse) / 1000.0;
-    this.timeLastResponse = Date.now();
-
+    let deltaTime = (animSys.timeMs - this.timeLastResponse) / 1000.0;
+    this.timeLastResponse = animSys.timeMs;
 
     /* Computing current acceleration */
     if (this.isBreaking && this.currentSpeed > 0) {
@@ -481,7 +520,6 @@ class classCar {
       this.currentAcceleration = 0;
     }
 
-
     /* Computing currentSpeed */
     this.currentSpeed += this.currentAcceleration * deltaTime;
 
@@ -491,26 +529,47 @@ class classCar {
       this.currentSpeed = 0.0;
     }
 
-    this.primitive.children[3].setVolume(this.maxVolume * (this.currentSpeed / (this.maxSpeed + this.currentBuff)));
-    this.primitive.children[2].setVolume(this.maxVolume * (1 - (this.currentSpeed / (this.maxSpeed + this.currentBuff))));
-    
+    /* Compute sounds */
+    this.sound_01.setVolume(this.maxVolume * (this.currentSpeed / (this.maxSpeed + this.currentBuff)));
+    this.sound_00.setVolume(this.maxVolume * (1 - (this.currentSpeed / (this.maxSpeed + this.currentBuff))));
 
     /* Computing delta length */
     let deltaLength = this.currentSpeed * deltaTime + 0.5 * this.currentAcceleration * deltaTime ** 2;
 
     /* Computing currentDir */
-    this.currentDir.add(this.tmp.subVectors(this.targetDir, this.currentDir).normalize().multiplyScalar(this.rotationSpeed)).normalize();
+    this.currentDir.add(this.tmpVec.subVectors(this.targetDir, this.currentDir).normalize().multiplyScalar(this.rotationSpeed)).normalize();
 
     /* Movement */
-    //this.primitive.lookAt(this.tmp.addVectors(this.currentDir, this.primitive.position));
-    this.primitive.position.add(this.tmp.copy(this.currentDir).multiplyScalar(deltaLength));
+    this.primitive.position.add(this.tmpVec.copy(this.currentDir).multiplyScalar(deltaLength));
 
-    if (this.tmp.subVectors(this.targetDir, this.currentDir).length() < this.rotationSpeed) {
-      this.primitive.lookAt(this.tmp.addVectors(this.targetDir, this.primitive.position));
+    if (this.tmpVec.subVectors(this.targetDir, this.currentDir).length() < this.rotationSpeed) {
+      this.primitive.lookAt(this.tmpVec.addVectors(this.targetDir, this.primitive.position));
     } else {
-      this.primitive.lookAt(this.tmp.addVectors(this.currentDir, this.primitive.position));
+      this.primitive.lookAt(this.tmpVec.addVectors(this.currentDir, this.primitive.position));
+
+      if (this.currentDir.x * this.targetDir.z - this.currentDir.z * this.targetDir.x > 0) {
+        this.model.children[3].children[1].children[0].setRotationFromAxisAngle(this.tmpVec.set(0, 0, 1), -0.15 * Math.PI);
+        this.model.children[3].children[1].children[1].setRotationFromAxisAngle(this.tmpVec.set(0, 0, 1), -1.15 * Math.PI);
+      } else {
+        this.model.children[3].children[1].children[0].setRotationFromAxisAngle(this.tmpVec.set(0, 0, 1), 0.15 * Math.PI);
+        this.model.children[3].children[1].children[1].setRotationFromAxisAngle(this.tmpVec.set(0, 0, 1), 1.15 * Math.PI);
+      }
     }
     
+    for (let i = 0; i < 2; i++) {
+      this.tmpMat.identity().makeRotationY(((i % 2) * 2 - 1) * -1 * (this.currentSpeed / this.radiusWheel) * deltaTime);
+
+      this.model.children[3].children[1].children[i].children[2].applyMatrix4(this.tmpMat);
+      this.model.children[3].children[1].children[i].children[4].applyMatrix4(this.tmpMat);
+      this.model.children[3].children[1].children[i].children[5].applyMatrix4(this.tmpMat);
+    }
+    for (let i = 2; i < 4; i++) {
+      this.tmpMat.identity().makeRotationY(((i % 2) * 2 - 1) * -1 * (this.currentSpeed / this.radiusWheel) * deltaTime);
+
+      this.model.children[3].children[1].children[i].children[1].applyMatrix4(this.tmpMat);
+      this.model.children[3].children[1].children[i].children[3].applyMatrix4(this.tmpMat);
+      this.model.children[3].children[1].children[i].children[4].applyMatrix4(this.tmpMat);
+    }
   }
 }
 
@@ -532,7 +591,7 @@ class classCameraTracker {
   response (target) {
     if (this.isFirstResponse) {
       this.isFirstResponse = false;
-      this.timeLastUpdate = Date.now();
+      this.timeLastUpdate = animSys.timeMs;
       return;
     }
 
@@ -545,16 +604,14 @@ class classCameraTracker {
       this.currentSpeed = 0;
     }
 
-
-
     if (isBreaking) {
       this.currentAcceleration = -this.deltaAcceleration;
     } else {
       this.currentAcceleration = this.deltaAcceleration;
     }
 
-    let deltaTime = (Date.now() - this.timeLastUpdate) / 1000.0;
-    this.timeLastUpdate = Date.now();
+    let deltaTime = (animSys.timeMs - this.timeLastUpdate) / 1000.0;
+    this.timeLastUpdate = animSys.timeMs;
 
     this.currentSpeed += this.currentAcceleration * deltaTime;
 
@@ -572,26 +629,111 @@ class classCameraTracker {
   }
 }
 
+
+
+class classModelTester {
+  constructor() {
+
+    this.tmpVec = new THREE.Vector3();
+    this.tmpMatr = new THREE.Matrix4();
+
+    this.car = new THREE.Group();
+    this.car.position.set(-120, 0, -120);
+    
+    this.primitive = new THREE.Object3D();
+    this.primitive.copy(model_car).scale.set(0.03, 0.03, 0.03);
+    this.primitive.position.set(6.7, 0, 6.6);
+    this.primitive.rotation.y = -0.5 * Math.PI;
+
+    
+    this.lights = [new THREE.SpotLight(), new THREE.SpotLight()];
+    this.helpers = [];
+
+    for (let i = 0; i < 2; i++) {
+      this.lights[i].color.set(0xffFFff);
+      this.lights[i].intensity = 1;
+
+      this.lights[i].position.copy(this.tmpVec.set( ((i % 2) * 2 - 1) * 2.45, 2.3, 11.85));
+      this.lights[i].target.position.copy(this.tmpVec.addVectors(this.lights[i].position, new THREE.Vector3(0, 0, 1)));
+      this.lights[i].angle = 0.3;
+      this.lights[i].distance = 10;
+      
+      this.lights[i].add(this.lights[i].target);
+      
+      this.car.add(this.lights[i]);
+    }
+    
+    
+    this.axesHelper = new THREE.AxesHelper( 20 );
+
+    this.car.add(this.primitive);
+    this.car.add(this.axesHelper);
+    animSys.scene.add(this.car);
+
+
+  }
+
+  response () {
+    /* -2.45, 2.3, 11.85 */
+    /*this.light.position.copy(this.tmpVec.set(-2.45, 2.3, 11.85));
+    this.light.target.position.copy(this.tmpVec.addVectors(this.light.position, new THREE.Vector3(0, 0, 1)));
+    this.light.setRotationFromAxisAngle(new THREE.Vector3(0, 1, 0), tmpObj.angle * Math.PI);*/
+    
+  }
+}
+
 class classLight {
   constructor (color, dayTime) {
     this.dayTime = dayTime;
     this.color = color;
 
-    this.spotLight = new THREE.SpotLight(color);
-    this.value = Math.sin(((animSys.timeMs / 1000.0) % this.dayTime) / this.dayTime * Math.PI) * 0.8 + 0.2;
-    this.spotLight.power = this.value * Math.PI;
-    this.spotLight.position.set(-40, 600, -10);
-    this.spotLight.castShadow = true;
-    animSys.scene.add(this.spotLight);
+    this.primitive = new THREE.DirectionalLight(color);
+    this.dayProgress = ((animSys.timeMs / 1000.0) % this.dayTime) / this.dayTime;
+    this.value = Math.sin(this.dayProgress * Math.PI) * 0.8 + 0.2;
+    this.primitive.intensity = this.value;
+
+    this.rotationRadius = 300;
+
+    this.primitive.position.set(Math.cos(this.dayProgress * 2 * Math.PI) * this.rotationRadius, 
+                                400, 
+                                Math.sin(this.dayProgress * 2 * Math.PI) * this.rotationRadius);
+    this.primitive.target.position.set(0, 0, 0);
+    this.primitive.castShadow = true;
+
+    this.helper = new THREE.DirectionalLightHelper(this.primitive);
+    animSys.scene.add(this.helper);
+
+    animSys.scene.add(this.primitive);
+    animSys.scene.add(this.primitive.target);
   }
 
   response () {
-    this.value = Math.sin(((animSys.timeMs / 1000.0) % this.dayTime) / this.dayTime * Math.PI) * 0.8 + 0.2;
-    this.spotLight.power = this.value * Math.PI;
+    this.dayProgress = ((animSys.timeMs / 1000.0) % this.dayTime) / this.dayTime;
+    this.value = Math.sin(this.dayProgress * Math.PI) * 0.8 + 0.2;
+    this.primitive.intensity = this.value;
+
+    this.primitive.position.set(Math.cos(this.dayProgress * 2 * Math.PI) * this.rotationRadius, 
+                                400, 
+                                Math.sin(this.dayProgress * 2 * Math.PI) * this.rotationRadius);
+    this.primitive.target.updateMatrixWorld();
+    this.helper.update();
   }
 
 }
 
+/* GUI helper */
+class ColorGUIHelper {
+  constructor(object, prop) {
+    this.object = object;
+    this.prop = prop;
+  }
+  get value() {
+    return `#${this.object[this.prop].getHexString()}`;
+  }
+  set value(hexString) {
+    this.object[this.prop].set(hexString);
+  }
+}
 
 
 function tick() {
@@ -608,24 +750,26 @@ function tick() {
     cameraTracker.speed = traffic.cars[traffic.indPlayer].maxSpeed + traffic.cars[traffic.indPlayer].currentBuff - 10;
     cameraTracker.response(traffic.cars[traffic.indPlayer].primitive.position);
   }
+  //tester.response();
 
   /* Render */
   animSys.render();
 }
+
 
 let infoText;
 let speedText;
 let animSys;
 let cameraTracker;
 let landscape;
-let editor;
 let traffic;
 let model_car;
-let sound_01;
-let sound_buffer_01;
 let listener;
 let light;
 let canvas;
+let gui;
+let tester;
+let editor;
 
 async function initialization () {
   /* Animation system */
@@ -636,22 +780,50 @@ async function initialization () {
     resolve();
   });
 
-  /* Resources */
+  
   await new Promise(function (resolve, reject) {
-    /* Models */
+    let loader = new FBXLoader();
+    //loader.load( './src/sport_car_03/Toyota Chaser TourerV.fbx', function ( object ) {
+    loader.load( './src/sport_car_04/car.fbx', function ( object ) {
+
+      object.traverse( function ( child ) {
+
+        console.log(child.name);
+        if ( child.isMesh ) {
+          child.castShadow = true;
+          child.receiveShadow = true;
+        }
+      });
+
+      model_car = object;
+      resolve();
+    });
+  });
+
+
+  /*
+  await new Promise(function (resolve, reject) {
+    
     const mtlLoader = new MTLLoader();
     mtlLoader.load('./src/sport_car_01/car.mtl', (mtlParseResult) => {
-        const objLoader = new OBJLoader2();
-        const materials =  MtlObjBridge.addMaterialsFromMtlLoader(mtlParseResult);
+        const objLoader = new OBJLoader();
+        //const materials = MtlObjBridge.addMaterialsFromMtlLoader(mtlParseResult);
         materials.Material.side = THREE.DoubleSide;
-        objLoader.addMaterials(materials);
+        objLoader.addMaterials( mtlParseResult);
         objLoader.load('./src/sport_car_01/car.obj', (root) => {
+
+          root.traverse( function (child) {
+            console.log(child);
+
+
+          })
           model_car = root;
           resolve();
         });
       })
     });
 
+    */
   /* Camera tracker system */
   cameraTracker = new classCameraTracker(100, 70, 20, 10);
 
@@ -660,6 +832,7 @@ async function initialization () {
 
   /* Traffic */
   traffic = new classTraffic();
+  //tester = new classModelTester();
 
   /* Landscape */
   let commonPath = "./src/images/landscape/";
@@ -676,10 +849,9 @@ async function initialization () {
     commonPath + "texture_road.jpg");
 
   /* Editor */
-  /*
-  editor = new classEditor(4, 0xff0000, 0.5);
-  animSys.scene.add(editor.primitive); 
-  */
+  
+  //editor = new classEditor(4, 0xff0000, 0.5);
+  //animSys.scene.add(editor.primitive); 
 
 
   /* Skybox */
@@ -692,7 +864,25 @@ async function initialization () {
     './src/images/skybox_01/zneg.jpg'
     ]);
 
+
+  gui.addColor(new ColorGUIHelper(light.primitive, 'color'), 'value').name('color');
+  gui.add(tmpObj, 'Z', -20, 20, 0.05);
+  gui.add(tmpObj, 'Y', -20, 20, 0.05);
+  gui.add(tmpObj, 'X', -20, 20, 0.05);
+  gui.add(tmpObj, 'angle', -1, 1, 0.05);
+
 }
+
+class classtmpObj {
+  constructor() {
+    this.X = 0;
+    this.Y = 0;
+    this.Z = 0;
+    this.angle = 0;
+  }
+}
+
+let tmpObj = new classtmpObj()
 
 function mainFunction() {
   /* HTML texts */
@@ -702,6 +892,52 @@ function mainFunction() {
   /* Canvas */
   canvas = document.getElementById("idCanvas");
   
+  /* GUI */
+  gui = new dat.GUI();
+
+
+  /*
+  animSys = new classAnimation();
+  animSys.setCamPos([-30, 40, 30]);
+  animSys.setCamAt([0, 0, 0]);*/
+
+
+
+  /* Test of model */
+
+
+  /*
+  new MTLLoader()
+    .load( './src/sport_car_01/car.mtl', function ( materials ) {
+
+    //materials.preload();
+
+    new OBJLoader()
+      .setMaterials( materials )
+      .load( './src/sport_car_01/car.obj', function ( object ) {
+        object.traverse( function ( child ){
+          console.log(child.name);
+        });
+        animSys.scene.add(object);
+      });
+  });
+  */
+
+    /*
+  const loader = new OBJLoader2();
+  loader.load( './src/sport_car_01/car.obj', function ( object ) {
+
+    console.log(object);
+
+    object.traverse( function ( child ){
+      console.log(child.name);
+    });
+  });
+  */
+
+
+
+    
   infoText.innerHTML = "We are loading resources...";
   initialization().then(
     result => {
