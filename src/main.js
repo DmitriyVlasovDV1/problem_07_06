@@ -47,6 +47,9 @@ class classAnimation {
 
     /* Skybox */
     this.skyBox;
+
+    /* Lights */
+    this.lights = [];
   }
 
   /* Controls handle mthods */
@@ -155,7 +158,8 @@ class classLandscape {
         maxHeight: { value: this.maxHeight },
         time: {value: animSys.timeMs},
         lightCoeff: {value: light.value},
-        lightColor: {value: light.primitive.color}
+        lightColor: {value: light.primitive.color},
+        lights: {value: []}
       },
 
       vertexShader: vertShaderStrLandscape,
@@ -170,6 +174,21 @@ class classLandscape {
 
   }
   response (){
+
+    let lightsArray = []
+    for (let i = 0; i < animSys.lights.length; i++) {
+      lightsArray.push({
+        pos: animSys.lights[i].getWorldPosition(),
+        dir: (new THREE.Vector3()).subVectors(animSys.lights[i].target.getWorldPosition(), animSys.lights[i].getWorldPosition()),
+        angle: animSys.lights[i].angle || 0,
+        color: animSys.lights[i].color,
+        intensity: animSys.lights[i].intensity,
+        distance: animSys.lights[i].distance || 0,
+        type: animSys.lights[i].isSpotLight ? 0 : 1,
+      });
+    }
+
+    this.primitive.material.uniforms.lights.value = lightsArray;
     this.primitive.material.uniforms.lightCoeff.value = light.value;
     this.primitive.material.uniforms.time.value = animSys.timeMs;
   }
@@ -272,7 +291,7 @@ class classTraffic {
     this.radarRadius = 20;
 
     this.cars = []
-    this.numOfCars = 10;
+    this.numOfCars = 5;
     for (let i = 0; i < this.numOfCars; i++) {
       this.cars.push(new classCar(this.tmp.addVectors(this.segments[i][0], this.segments[i][1]).multiplyScalar(0.5), i + 1));
     }
@@ -407,6 +426,7 @@ class classCar {
     /* Main Group */
     this.primitive = new THREE.Group();
     this.primitive.position.copy(position);
+
     animSys.scene.add(this.primitive);
     
 
@@ -454,27 +474,31 @@ class classCar {
     });
 
     /* Headlights */
+
+    this.lightsIntensity = 0.5;
     this.lights = [new THREE.SpotLight(), new THREE.SpotLight()];
 
     for (let i = 0; i < 2; i++) {
-      this.lights[i].color.set(0xffFFff);
-      this.lights[i].intensity = 1;
+      this.lights[i].color.set(0xFFD700);
+      this.lights[i].intensity = 0;
 
       this.lights[i].position.copy(this.tmpVec.set( ((i % 2) * 2 - 1) * 2.45, 2.3, 11.85));
-      this.lights[i].target.position.copy(this.tmpVec.addVectors(this.lights[i].position, new THREE.Vector3(0, 0, 1)));
-      this.lights[i].angle = 0.3;
-      this.lights[i].distance = 10;
+      this.lights[i].target.position.copy(this.tmpVec.addVectors(this.lights[i].position, new THREE.Vector3(0, -2, 5)));
+      this.lights[i].angle = 0.2;
+      this.lights[i].distance = 160;
       
       this.lights[i].add(this.lights[i].target);
       
       this.primitive.add(this.lights[i]);
+
+      animSys.lights.push(this.lights[i]);
     }
     
     /* Movements params */
 
     /* Constants */
     this.maxSpeed = 70;
-    this.rotationSpeed = 0.1;
+    this.rotationSpeed = 0.07;
     this.accelerationStarting = 20;
     this.accelerationBreaking = -100;
     this.radiusWheel = 0.8;
@@ -529,6 +553,15 @@ class classCar {
       this.currentSpeed = 0.0;
     }
 
+    /* Headlights */
+    for (let i = 0; i < 2; i++) {
+      if (light.value < 0.4) {
+        this.lights[i].intensity = this.lightsIntensity;
+      } else {
+        this.lights[i].intensity = 0;
+      }
+    }
+    
     /* Compute sounds */
     this.sound_01.setVolume(this.maxVolume * (this.currentSpeed / (this.maxSpeed + this.currentBuff)));
     this.sound_00.setVolume(this.maxVolume * (1 - (this.currentSpeed / (this.maxSpeed + this.currentBuff))));
@@ -546,14 +579,16 @@ class classCar {
       this.primitive.lookAt(this.tmpVec.addVectors(this.targetDir, this.primitive.position));
     } else {
       this.primitive.lookAt(this.tmpVec.addVectors(this.currentDir, this.primitive.position));
+    }
 
-      if (this.currentDir.x * this.targetDir.z - this.currentDir.z * this.targetDir.x > 0) {
-        this.model.children[3].children[1].children[0].setRotationFromAxisAngle(this.tmpVec.set(0, 0, 1), -0.15 * Math.PI);
-        this.model.children[3].children[1].children[1].setRotationFromAxisAngle(this.tmpVec.set(0, 0, 1), -1.15 * Math.PI);
-      } else {
-        this.model.children[3].children[1].children[0].setRotationFromAxisAngle(this.tmpVec.set(0, 0, 1), 0.15 * Math.PI);
-        this.model.children[3].children[1].children[1].setRotationFromAxisAngle(this.tmpVec.set(0, 0, 1), 1.15 * Math.PI);
-      }
+    /* Wheels rotation */
+    let sinRot = this.currentDir.x * this.targetDir.z - this.currentDir.z * this.targetDir.x;
+    if (sinRot > 0) {
+      this.model.children[3].children[1].children[0].setRotationFromAxisAngle(this.tmpVec.set(0, 0, 1), -Math.asin(sinRot));
+      this.model.children[3].children[1].children[1].setRotationFromAxisAngle(this.tmpVec.set(0, 0, 1), -Math.asin(sinRot) + Math.PI);
+    } else {
+      this.model.children[3].children[1].children[0].setRotationFromAxisAngle(this.tmpVec.set(0, 0, 1), -Math.asin(sinRot));
+      this.model.children[3].children[1].children[1].setRotationFromAxisAngle(this.tmpVec.set(0, 0, 1), -Math.asin(sinRot) + Math.PI);
     }
     
     for (let i = 0; i < 2; i++) {
@@ -700,8 +735,10 @@ class classLight {
     this.primitive.target.position.set(0, 0, 0);
     this.primitive.castShadow = true;
 
-    this.helper = new THREE.DirectionalLightHelper(this.primitive);
-    animSys.scene.add(this.helper);
+    /*this.helper = new THREE.DirectionalLightHelper(this.primitive);
+    animSys.scene.add(this.helper);*/
+    animSys.lights.push(this.primitive);
+
 
     animSys.scene.add(this.primitive);
     animSys.scene.add(this.primitive.target);
@@ -709,14 +746,14 @@ class classLight {
 
   response () {
     this.dayProgress = ((animSys.timeMs / 1000.0) % this.dayTime) / this.dayTime;
-    this.value = Math.sin(this.dayProgress * Math.PI) * 0.8 + 0.2;
+    this.value = (Math.sin(this.dayProgress * 2 * Math.PI) + 1) * 0.5;
     this.primitive.intensity = this.value;
 
     this.primitive.position.set(Math.cos(this.dayProgress * 2 * Math.PI) * this.rotationRadius, 
                                 400, 
                                 Math.sin(this.dayProgress * 2 * Math.PI) * this.rotationRadius);
     this.primitive.target.updateMatrixWorld();
-    this.helper.update();
+    /*this.helper.update();*/
   }
 
 }
@@ -801,31 +838,8 @@ async function initialization () {
   });
 
 
-  /*
-  await new Promise(function (resolve, reject) {
-    
-    const mtlLoader = new MTLLoader();
-    mtlLoader.load('./src/sport_car_01/car.mtl', (mtlParseResult) => {
-        const objLoader = new OBJLoader();
-        //const materials = MtlObjBridge.addMaterialsFromMtlLoader(mtlParseResult);
-        materials.Material.side = THREE.DoubleSide;
-        objLoader.addMaterials( mtlParseResult);
-        objLoader.load('./src/sport_car_01/car.obj', (root) => {
-
-          root.traverse( function (child) {
-            console.log(child);
-
-
-          })
-          model_car = root;
-          resolve();
-        });
-      })
-    });
-
-    */
   /* Camera tracker system */
-  cameraTracker = new classCameraTracker(100, 70, 20, 10);
+  cameraTracker = new classCameraTracker(100, 70, 30, 10);
 
   /* Light */
   light = new classLight(0xffffff, 40);
@@ -865,11 +879,7 @@ async function initialization () {
     ]);
 
 
-  gui.addColor(new ColorGUIHelper(light.primitive, 'color'), 'value').name('color');
-  gui.add(tmpObj, 'Z', -20, 20, 0.05);
-  gui.add(tmpObj, 'Y', -20, 20, 0.05);
-  gui.add(tmpObj, 'X', -20, 20, 0.05);
-  gui.add(tmpObj, 'angle', -1, 1, 0.05);
+  gui.addColor(new ColorGUIHelper(light.primitive, 'color'), 'value').name('Sun light color');
 
 }
 
@@ -895,49 +905,6 @@ function mainFunction() {
   /* GUI */
   gui = new dat.GUI();
 
-
-  /*
-  animSys = new classAnimation();
-  animSys.setCamPos([-30, 40, 30]);
-  animSys.setCamAt([0, 0, 0]);*/
-
-
-
-  /* Test of model */
-
-
-  /*
-  new MTLLoader()
-    .load( './src/sport_car_01/car.mtl', function ( materials ) {
-
-    //materials.preload();
-
-    new OBJLoader()
-      .setMaterials( materials )
-      .load( './src/sport_car_01/car.obj', function ( object ) {
-        object.traverse( function ( child ){
-          console.log(child.name);
-        });
-        animSys.scene.add(object);
-      });
-  });
-  */
-
-    /*
-  const loader = new OBJLoader2();
-  loader.load( './src/sport_car_01/car.obj', function ( object ) {
-
-    console.log(object);
-
-    object.traverse( function ( child ){
-      console.log(child.name);
-    });
-  });
-  */
-
-
-
-    
   infoText.innerHTML = "We are loading resources...";
   initialization().then(
     result => {

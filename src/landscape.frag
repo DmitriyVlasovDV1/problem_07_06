@@ -21,7 +21,20 @@ uniform sampler2D texSand;
 uniform sampler2D texLava;
 uniform sampler2D texRoad;
 uniform float texSclae;
-uniform float lightCoeff;
+
+in vec3 fragPosition;
+
+struct light {
+  vec3 pos;
+  vec3 dir;
+  float angle;
+  vec3 color;
+  float intensity;
+  float distance;
+  int type;
+};
+
+uniform light lights[ 11 ];
 
 in vec2 vUv;
 
@@ -36,20 +49,51 @@ void main() {
               min(DELTA_DIRT, 
                   DELTA_SAND)))));
 
+  vec4 resTex;
+
   if (res == DELTA_GRASS) {
-    gl_FragColor = texture2D(texGrass, vUv * texSclae) * lightCoeff;
+    resTex = texture2D(texGrass, vUv * texSclae);
   } else if (res == DELTA_STONE) {
-    gl_FragColor = texture2D(texStone, vUv * texSclae) * lightCoeff;
+    resTex = texture2D(texStone, vUv * texSclae);
   } else if (res == DELTA_DIRT) {
-    gl_FragColor = texture2D(texDirt, vUv * texSclae) * lightCoeff;
+    resTex = texture2D(texDirt, vUv * texSclae);
   } else if (res == DELTA_SAND) {
-    gl_FragColor = texture2D(texSand, vUv * texSclae) * lightCoeff;
+    resTex = texture2D(texSand, vUv * texSclae);
   } else if (res == DELTA_ROAD) {
-    gl_FragColor = texture2D(texRoad, vUv * texSclae) * lightCoeff;
+    resTex = texture2D(texRoad, vUv * texSclae);
   } else if (res == DELTA_LAVA) {
-    gl_FragColor = texture2D(texLava, vUv * texSclae) * lightCoeff;
+    resTex = texture2D(texLava, vUv * texSclae);
   } else {
-    gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0) * lightCoeff;
+    resTex = vec4(1.0, 0.0, 0.0, 1.0);
   }
 
+  vec3 lightCoeff = vec3(0.0, 0.0, 0.0);
+
+  for (int i = 0; i < 11; i++) {
+    light item = lights[i]; 
+    /* SpotLight */ 
+    if (item.type == 0) {
+      vec3 pointDir = fragPosition - item.pos;
+      float proj = dot(normalize(item.dir), pointDir);
+
+      bool cond1 = 0.0 <= proj && proj <= item.distance;
+      bool cond2 = (proj / cos(item.angle)) >= length(pointDir);
+
+      if (cond1 && cond2) {
+        lightCoeff += item.intensity * item.color;
+      }
+    /* DirectionalLight */
+    } else if (item.type == 1) {
+      vec3 pointDir = fragPosition - item.pos;
+      float proj = dot(normalize(item.dir), pointDir);
+
+      if (length(proj) >= 0.0) {
+        lightCoeff += item.intensity * item.color;
+      }
+    }
+  }
+
+ 
+  gl_FragColor = resTex * vec4(lightCoeff, 1.0);
+  
 }
